@@ -1,3 +1,5 @@
+import copy
+
 class Quanta:
     def __init__(self, parent, name, fieldname):
         self.parent = parent
@@ -73,17 +75,41 @@ class Quanta:
         pass
 
 class CorrelationDB:
-    def __init__(self, root_quanta):
+    def __init__(self, root_quanta=None, fieldlist=[]):
         self.root = root_quanta
+        self.reverse_root = None
+        self.fieldlist = fieldlist
+        self.reverse_fieldlist = copy.deepcopy(fieldlist)
+        self.reverse_fieldlist.reverse()
+
+    def add(self, obj):
+        if isinstance(obj, list):
+            for o in obj:
+                self.add(o)
+            return
+
+        if not self.root:
+            self.root = Quanta(None, "root", None)
+            self.reverse_root = Quanta(None, "root", None)
+
+        self.root.addObj(obj, *self.fieldlist)
+        self.reverse_root.addObj(obj, *self.reverse_fieldlist)
+
+    def query2_rev(self, field1, field2):
+        return self._query2(field1, field2, self.reverse_root)
 
     def query2(self, field1, field2):
+        return self._query2(field1, field2, self.root)
+
+    #def query2(self, field1, field2):
+    def _query2(self, field1, field2, root):
         """
         Gets the breakdown of field2 in relation to field1. e.g. field1
         is composed of so many <>, <>, and <> where <> comes from field2.
         """
 
         # Search for all field1 quanta
-        f1_quanta = self.root.getQuanta(field=field1)
+        f1_quanta = root.getQuanta(field=field1)
         #for q in f1_quanta:
         #    q.pprint()
 
@@ -125,8 +151,10 @@ if __name__ == "__main__":
 
     # Now test the correlationDB
 
-    c = CorrelationDB(q)
+    c = CorrelationDB(fieldlist=["f1", "f2", "f3"])
+    cProfile.run("""c.add(objects)""")
+
     #print c.query2("f1", "f3")
     cProfile.run("""print c.query2("f1", "f3")""")
 
-    cProfile.run("""print c.query2("f3", "f1")""")
+    cProfile.run("""print c.query2_rev("f3", "f1")""")
