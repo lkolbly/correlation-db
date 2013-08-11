@@ -99,6 +99,9 @@ class CorrelationDB:
         return self._query2(field1, field2, self.reverse_root)
 
     def query2(self, field1, field2):
+        # Check to see if field2 comes before field1 in the fieldlist
+        if self.fieldlist.index(field1) > self.fieldlist.index(field2):
+            return self.query2_rev(field1, field2)
         return self._query2(field1, field2, self.root)
 
     #def query2(self, field1, field2):
@@ -130,15 +133,63 @@ class CorrelationDB:
 
         return result
 
+    def rootcause2(self, field, value):
+        """
+        Determine what values tend to be associated with the given field having
+        the given value.
+
+        Note that I only return single fields that have strong correlation, but
+        I don't mine the data any further.
+        """
+
+        values = []
+        for f in self.fieldlist:
+            if f == field:
+                continue
+            corr = self.query2(field, f)
+            new_values = []
+            for k,v in corr[value].items():
+                new_values.append((f, k, v))
+                pass
+
+            """
+            # What would we expect if there were no correlation?
+            # Note: This is also the mean. FYI
+            expected = 1.0 / len(new_values)
+
+            # Determine the standard deviation from that expected
+            std_dev = 0.0
+            for v in new_values:
+                std_dev += v[2]
+            std_dev = math.sqrt(std_dev / len(new_values))
+
+            # Figure out who is
+            """
+
+            values += new_values
+        print values
+        return sorted(values, key=lambda v: v[2])
+        return values
+
 if __name__ == "__main__":
-    indep_vars = ["asdf", "qwer", "zxcv"]
-    dep_vars = ["tyui", "ghjk", "bnm"]
-    f3_vars = ["a", "b", "c", "d"]
+    apache_vars = ["1.0", "1.3", "1.5", "2.0", "2.2", "2.4"]
+    php_vars = ["3.0", "4.0", "5.0"]
+    bl_vars = ["malicious","safe"]
+    bl_weighted_vars = ["malicious","malicious","malicious","safe"]
 
     import random
     objects = []
     for i in xrange(10000):
-        objects.append({"f1": random.choice(indep_vars), "f2": random.choice(dep_vars), "f3": random.choice(f3_vars)})
+        apache = random.choice(apache_vars)
+        php = random.choice(php_vars)
+        if apache == "1.0":
+            bl = random.choice(bl_weighted_vars)
+        else:
+            bl = random.choice(bl_vars)
+        if random.randint(1,100) == 50:
+            objects.append({"apache": apache, "bl": bl})
+        else:
+            objects.append({"apache": apache, "php": php, "bl": bl})
 
     # work with quanta
 
@@ -146,15 +197,19 @@ if __name__ == "__main__":
     #for o in objects:
     #    q.add(cvtObjectToFieldList(o, "f1", "f2", "f3"))
     import cProfile
-    cProfile.run("""q.addObj(objects, "f1", "f2", "f3") """)
+    cProfile.run("""q.addObj(objects, "apache", "php", "bl") """)
     q.pprint()
 
     # Now test the correlationDB
 
-    c = CorrelationDB(fieldlist=["f1", "f2", "f3"])
+    c = CorrelationDB(fieldlist=["apache", "php", "bl"])
     cProfile.run("""c.add(objects)""")
 
     #print c.query2("f1", "f3")
-    cProfile.run("""print c.query2("f1", "f3")""")
+    cProfile.run("""print c.query2("apache", "bl")""")
 
-    cProfile.run("""print c.query2_rev("f3", "f1")""")
+    cProfile.run("""print c.query2_rev("bl", "apache")""")
+
+    cProfile.run("""print c.query2("bl", "apache")""")
+
+    cProfile.run("""print c.rootcause2("bl", "malicious")""")
