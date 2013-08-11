@@ -1,10 +1,17 @@
 class Quanta:
-    def __init__(self, parent, name):
+    def __init__(self, parent, name, fieldname):
         self.parent = parent
         self.name = name
+        self.fieldname = fieldname
         self.children = {}
         self.count = 0
         pass
+
+    def __str__(self):
+        return "<Quanta:field %s=%s, cnt=%s>"%(self.fieldname,self.name,self.count)
+
+    def __repr__(self):
+        return self.__str__()
 
     def add(self, flist):
         """
@@ -16,7 +23,7 @@ class Quanta:
         if len(flist) == 0:
             return
         if flist[0][1] not in self.children:
-            self.children[flist[0][1]] = Quanta(self, flist[0][1])
+            self.children[flist[0][1]] = Quanta(self, flist[0][1], flist[0][0])
         self.children[flist[0][1]].add(flist[1:])
         pass
 
@@ -55,110 +62,71 @@ class Quanta:
         self.add(self.cvtObjectToFieldList(obj, *fields))
         pass
 
-class Index:
-    """
-    Maps a => b => c => d for a given number of these.
-    Maintains the count for these relationships.
-    """
-    def __init__(self, *fields):
-        self.counts = []
-        self.fields = fields
-        for f in fields:
-            self.counts.append({})
-        pass
-
-    def add(self, obj):
-        for i in xrange(len(self.counts)):
-            pass
+    def getQuanta(self, field=None):
+        if field:
+            qlist = []
+            if self.fieldname == field:
+                qlist.append(self)
+            for c in self.children.values():
+                qlist += c.getQuanta(field)
+            return qlist
         pass
 
 class CorrelationDB:
-    def __init__(self):
-        self.objects = []
-        pass
+    def __init__(self, root_quanta):
+        self.root = root_quanta
 
-    def add(self, obj):
-        self.objects.append(obj)
-
-    def _relate_object(self, index, obj, *fields):
-        ind = index
-        for f in fields:
-            print f
-            ref = ind[f]
-        pass
-
-    def relate(self, *fields):
+    def query2(self, field1, field2):
         """
-        Relate the given fields in a a => b => c => etc. fashion.
+        Gets the breakdown of field2 in relation to field1. e.g. field1
+        is composed of so many <>, <>, and <> where <> comes from field2.
         """
 
-        self._relate_object({}, self.objects[0], *fields)
-        return None,None
+        # Search for all field1 quanta
+        f1_quanta = self.root.getQuanta(field=field1)
+        #for q in f1_quanta:
+        #    q.pprint()
 
-        if len(fields) == 2:
-            return relateTwoEnum(fields[0], fields[1])
-
-        counts = []
-        for i in xrange(len(fields)):
-            counts.append({})
-
-        for o in self.objects:
-            for i in xrange(len(fields)):
+        # Within each one, find all field2 quanta
+        f2_quanta = []
+        result = {}
+        for q in f1_quanta:
+            f2_quanta = q.getQuanta(field=field2)
+            counts = {}
+            for q2 in f2_quanta:
+                if q2.name not in counts:
+                    counts[q2.name] = 0
+                counts[q2.name] += float(q2.count) / float(q.count)
                 pass
-            pass
+            #print f2_quanta
+            #print "%s: %s"%(q.name,str(counts))
+            result[q.name] = counts
 
-    def relateTwoEnum(self, independant, dependant):
-        """
-        Related two fields in a x => y relation where x and y are both
-        enum-able values.
-        """
-
-        indep_count = {}
-        root_count = {}
-        for o in self.objects:
-            if o[independant] not in indep_count:
-                indep_count[o[independant]] = {}
-            if o[dependant] not in indep_count[o[independant]]:
-                indep_count[o[independant]][o[dependant]] = 0
-            indep_count[o[independant]][o[dependant]] += 1
-
-            if o[independant] not in root_count:
-                root_count[o[independant]] = 0
-            root_count[o[independant]] += 1
-        return indep_count, root_count
+        return result
 
 if __name__ == "__main__":
-    c = CorrelationDB()
-
     indep_vars = ["asdf", "qwer", "zxcv"]
     dep_vars = ["tyui", "ghjk", "bnm"]
     f3_vars = ["a", "b", "c", "d"]
 
     import random
     objects = []
-    for i in xrange(1000000):
+    for i in xrange(10000):
         objects.append({"f1": random.choice(indep_vars), "f2": random.choice(dep_vars), "f3": random.choice(f3_vars)})
-
-        """
-    for o in objects:
-        c.add(o)
-
-    print "Building relation"
-    t = c.relateTwoEnum("f1", "f2")
-    from pprint import pprint
-    pprint(t[0])
-    pprint(t[1])
-
-    t = c.relate("f1", "f2", "f3")
-    pprint(t[0])
-    pprint(t[1])
-    """
 
     # work with quanta
 
-    q = Quanta(None, "root")
+    q = Quanta(None, "root", None)
     #for o in objects:
     #    q.add(cvtObjectToFieldList(o, "f1", "f2", "f3"))
     import cProfile
     cProfile.run("""q.addObj(objects, "f1", "f2", "f3") """)
     q.pprint()
+
+    # Now test the correlationDB
+
+    c = CorrelationDB(q)
+    #print c.query2("f1", "f3")
+    cProfile.run("""print c.query2("f1", "f3")""")
+
+    cProfile.run("""print c.query2("f3", "f1")""")
