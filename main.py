@@ -5,7 +5,7 @@ class Quanta:
         self.parent = parent
         self.name = name
         self.fieldname = fieldname
-        self.children = {}
+        self.children = {} # Keyed on name, not fieldname
         self.count = 0
         pass
 
@@ -14,6 +14,17 @@ class Quanta:
 
     def __repr__(self):
         return self.__str__()
+
+    def assimilate(self, other):
+        self.count += other.count
+        for k,v in self.children.items():
+            if k not in other.children:
+                continue
+            self.children[k].assimilate(other.children[k])
+        for k,v in other.children.items():
+            if k not in self.children:
+                self.children[k] = Quanta(self, v.name, v.fieldname)
+                self.children[k].assimilate(other.children[k])
 
     def add(self, flist):
         """
@@ -74,6 +85,8 @@ class Quanta:
             return qlist
         pass
 
+import pickle
+
 class CorrelationDB:
     def __init__(self, root_quanta=None, fieldlist=[]):
         self.root = root_quanta
@@ -81,6 +94,13 @@ class CorrelationDB:
         self.fieldlist = fieldlist
         self.reverse_fieldlist = copy.deepcopy(fieldlist)
         self.reverse_fieldlist.reverse()
+
+    @staticmethod
+    def load(fp):
+        return pickle.loads(fp.read())
+
+    def save(self, fp):
+        fp.write(pickle.dumps(self))
 
     def add(self, obj):
         if isinstance(obj, list):
@@ -94,6 +114,14 @@ class CorrelationDB:
 
         self.root.addObj(obj, *self.fieldlist)
         self.reverse_root.addObj(obj, *self.reverse_fieldlist)
+
+    def assimilate(self, other):
+        if not self.root:
+            self.root = Quanta(None, "root", None)
+            self.reverse_root = Quanta(None, "root", None)
+        self.root.assimilate(other.root)
+        self.reverse_root.assimilate(other.reverse_root)
+        pass
 
     def query2_rev(self, field1, field2):
         return self._query2(field1, field2, self.reverse_root)
@@ -143,14 +171,20 @@ class CorrelationDB:
         """
 
         values = []
+        value_counts = {}
         for f in self.fieldlist:
             if f == field:
                 continue
-            corr = self.query2(field, f)
+            corr = self.query2(f, field)
             new_values = []
-            for k,v in corr[value].items():
-                new_values.append((f, k, v))
+            #print "CORR:",corr
+            for k,v in corr.items():
+                #print k,v
+                new_values.append((f, k, v[value]))
+                #for k2,v2 in v[value].items():
+                #    new_values.append((f, k2, v2))
                 pass
+            value_counts[f] = len(new_values)
 
             """
             # What would we expect if there were no correlation?
@@ -167,11 +201,37 @@ class CorrelationDB:
             """
 
             values += new_values
-        print values
+        #print values
         return sorted(values, key=lambda v: v[2])
         return values
 
-if __name__ == "__main__":
+# The map-reduce framework is important to me, so I will implement it here.
+# This uses the Hadoop streaming API.
+import sys, base64, json
+
+def mapper(fieldlist):
+    """
+    Reads jobs from stdin, and aggregates them into a DB that we pass off.
+    Jobs are read as JSON objects, one per line.
+    The result is a b64 encoded pickle of a CollectionDB.
+    """
+
+    c = CorrelationDB(fieldlist=fieldlist)
+    for line in sys.stdin.readlines():
+        c.add(json.loads(line))
+    print base64.b64encode(pickle.dumps(c))
+
+def reducer(fieldlist):
+    """
+    Reads CollectionDBs from stdin, and aggregates them into one DB.
+    """
+
+    c = CorrelationDB(fieldlist=fieldlist)
+    for line in sys.stdin.readlines():
+        c.assimilate(pickle.loads(base64.b64decode(line)))
+    print base64.b64encode(pickle.dumps(c))
+
+def test():
     apache_vars = ["1.0", "1.3", "1.5", "2.0", "2.2", "2.4"]
     php_vars = ["3.0", "4.0", "5.0"]
     bl_vars = ["malicious","safe"]
@@ -191,25 +251,51 @@ if __name__ == "__main__":
         else:
             objects.append({"apache": apache, "php": php, "bl": bl})
 
+    f = open("/tmp/data.json", "w")
+    for o in objects:
+        f.write(json.dumps(o)+"\n")
+    f.close()
+
     # work with quanta
 
     q = Quanta(None, "root", None)
     #for o in objects:
     #    q.add(cvtObjectToFieldList(o, "f1", "f2", "f3"))
     import cProfile
-    cProfile.run("""q.addObj(objects, "apache", "php", "bl") """)
+    cProfile.runctx("""q.addObj(objects, "apache", "php", "bl") """, globals(), locals())
     q.pprint()
 
     # Now test the correlationDB
 
     c = CorrelationDB(fieldlist=["apache", "php", "bl"])
-    cProfile.run("""c.add(objects)""")
+    cProfile.runctx("""c.add(objects)""", globals(), locals())
 
     #print c.query2("f1", "f3")
-    cProfile.run("""print c.query2("apache", "bl")""")
+    cProfile.runctx("""print c.query2("apache", "bl")""", globals(), locals())
 
-    cProfile.run("""print c.query2_rev("bl", "apache")""")
+    cProfile.runctx("""print c.query2_rev("bl", "apache")""", globals(), locals())
 
-    cProfile.run("""print c.query2("bl", "apache")""")
+    cProfile.runctx("""print c.query2("bl", "apache")""", globals(), locals())
 
-    cProfile.run("""print c.rootcause2("bl", "malicious")""")
+    cProfile.runctx("""print c.rootcause2("bl", "malicious")""", globals(), locals())
+
+    c.save(open("/tmp/test.pickle", "w"))
+    c2 = CorrelationDB.load(open("/tmp/test.pickle"))
+    print c2.query2("bl", "apache")
+
+if __name__ == "__main__":
+    import optparse
+    parser = optparse.OptionParser()
+    parser.add_option("-t", dest="test", action="store_true")
+    parser.add_option("-m", dest="map", action="store_true")
+    parser.add_option("-r", dest="reduce", action="store_true")
+    (options, args) = parser.parse_args()
+
+    if options.test:
+        test()
+    elif options.map:
+        mapper(["apache", "php", "bl"])
+    elif options.reduce:
+        reducer(["apache", "php", "bl"])
+    else:
+        test()
