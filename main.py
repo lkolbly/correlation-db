@@ -123,6 +123,14 @@ class CorrelationDB:
         self.reverse_root.assimilate(other.reverse_root)
         pass
 
+    def importFp(self, fp):
+        line = fp.readline()
+        while line:
+            if len(line) > 0:
+                self.add(json.loads(line))
+            line = fp.readline()
+        pass
+
     def query2_rev(self, field1, field2):
         return self._query2(field1, field2, self.reverse_root)
 
@@ -284,7 +292,51 @@ def test():
     print c2.query2("bl", "apache")
 
 if __name__ == "__main__":
-    import optparse
+    import argparse, sys
+    cmdline_args = sys.argv
+    if cmdline_args[1] == "db":
+        parser = argparse.ArgumentParser()
+        parser.add_argument("-c", "--create", dest="action", action="store_const", const="create")
+        parser.add_argument("-i", "--import", dest="action", action="store_const", const="import")
+        parser.add_argument("--field-list", dest="field_list", nargs="+")
+        parser.add_argument("-f", "--filename", dest="filename")
+        args = parser.parse_args(cmdline_args[2:])
+
+        if args.action == "create":
+            c = CorrelationDB(args.field_list)
+            c.save(open(args.filename, "w"))
+        elif args.action == "import": # Imports JSON objects from stdin
+            c = CorrelationDB.load(open(args.filename))
+            c.importFp(sys.stdin)
+            c.save(open(args.filename, "w"))
+    elif cmdline_args[1] == "shell":
+        parser = argparse.ArgumentParser()
+        parser.add_argument("-f", "--filename", dest="filename")
+        args = parser.parse_args(cmdline_args[2:])
+
+        cdb = CorrelationDB.load(open(args.filename))
+        print cdb.fieldlist
+
+        import cmd
+        prompt = cmd.Cmd()
+        def do_query(line):
+            if " " not in line.strip(" "):
+                print "You must specify two arguments"
+                return False
+            f1 = line.split(" ")[0]
+            f2 = line.split(" ")[1]
+            print cdb.fieldlist
+            print cdb.query2(f1, f2)
+            return False
+        def do_quit(line):
+            return True
+        prompt.do_query = do_query
+        prompt.do_quit = do_quit
+        prompt.cmdloop("Copyright (c) 2013 Lane Kolbly")
+
+        pass
+
+    """import optparse
     parser = optparse.OptionParser()
     parser.add_option("-t", dest="test", action="store_true")
     parser.add_option("-m", dest="map", action="store_true")
@@ -298,4 +350,4 @@ if __name__ == "__main__":
     elif options.reduce:
         reducer(["apache", "php", "bl"])
     else:
-        test()
+        test()"""
